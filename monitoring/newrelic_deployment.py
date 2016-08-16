@@ -82,8 +82,7 @@ EXAMPLES = '''
                        revision=1.0
 '''
 
-import urllib
-
+import requests
 # ===========================================
 # Module execution.
 #
@@ -109,39 +108,66 @@ def main():
 
     # build list of params
     params = {}
+
+    for item in [ "token", "changelog", "description", "revision", "user", "appname", "environment" ]:
+        if module.params[item]:
+            params[item] = module.params[item]
+        else:
+            params[item] = ""
+
     if module.params["app_name"] and module.params["application_id"]:
         module.fail_json(msg="only one of 'app_name' or 'application_id' can be set")
 
     if module.params["app_name"]:
         params["app_name"] = module.params["app_name"]
+
+        #-- Get Id from Name
+        headers = {
+            'X-Api-Key': params["token"]
+            }
+        data = "filter[name]=%s" % (params["app_name"])
+
+        r = requests.post( "https://api.newrelic.com/v2/applications.json", headers=headers, data=data )
+        jsondata = json.loads(r.text)
+
+        for i in jsondata['applications']:
+            if( i['name'] == params["app_name"]):
+                app_id = "%s" % i['id']
+
     elif module.params["application_id"]:
         params["application_id"] = module.params["application_id"]
+        app_id = params["application_id"]
     else:
         module.fail_json(msg="you must set one of 'app_name' or 'application_id'")
-    
-    for item in [ "changelog", "description", "revision", "user", "appname", "environment" ]:
-        if module.params[item]:
-            params[item] = module.params[item]
 
     # If we're in check mode, just exit pretending like we succeeded
     if module.check_mode:
         module.exit_json(changed=True)
 
     # Send the data to NewRelic
-    url = "https://rpm.newrelic.com/deployments.xml"
-    data = urllib.urlencode(params)
     headers = {
-        'x-api-key': module.params["token"],
-    }
-    response, info = fetch_url(module, url, data=data, headers=headers)
-    if info['status'] in (200, 201):
+        'X-Api-Key': params["token"],
+        'Content-Type': 'application/json'
+        }
+
+    data = """{ \
+        "deployment": {
+            "revision": "%s",
+            "changelog": "%s",
+            "description": "%s",
+            "user": "%s"
+            }
+        }""" % (params["revision"],params["changelog"], params["description"], params["user"])
+
+    r = requests.post('https://api.newrelic.com/v2/applications/' + app_id + '/deployments.json', headers=headers, data=data)
+
+    if r.status_code in (200, 201):
         module.exit_json(changed=True)
     else:
-        module.fail_json(msg="unable to update newrelic: %s" % info['msg'])
+        module.fail_json(msg="unable 2 update newrelic: %s" % r)
 
 # import module snippets
 from ansible.module_utils.basic import *
 from ansible.module_utils.urls import *
 
 main()
-
